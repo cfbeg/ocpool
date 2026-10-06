@@ -1,0 +1,32 @@
+import { readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { launchJobBrowser } from './job-browser.mjs';
+const resolvedJob = process.env.OCPOOL_INSPECT_RESOLVED_JOB;
+if (!resolvedJob || !/^job_[a-zA-Z0-9_-]+$/.test(resolvedJob)) throw new Error('Set OCPOOL_INSPECT_RESOLVED_JOB to a resolved job ID');
+const browser = await launchJobBrowser('.state/research/dashboard');
+try {
+  const page = browser.pages()[0] || await browser.newPage();
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto((await readFile('.state/server/access-url.txt', 'utf8')).trim(), { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'アカウントの稼働状況' }).waitFor();
+  await page.screenshot({ path: '.state/research/dashboard-overview.png', fullPage: true });
+  await page.locator('[data-view=accounts]').click();
+  await page.getByText('live-test-001', { exact: true }).waitFor();
+  await page.screenshot({ path: '.state/research/dashboard-accounts.png', fullPage: true });
+  await page.locator('[data-view=jobs]').click();
+  await page.locator('#job-filter').selectOption('resolved');
+  await page.locator(`[data-job="${resolvedJob}"]`).click();
+  await page.locator('#job-status').getByText('再開後に完了', { exact: true }).waitFor();
+  assert(await page.locator('#resume-job').isDisabled());
+  assert(!await page.locator('#retry-signup').isVisible());
+  assert(await page.locator('#job-resolution').isVisible());
+  assert(!await page.locator('#screen').isVisible());
+  assert(!await page.locator('.modal-content .browser-controls').isVisible());
+  await page.screenshot({ path: '.state/research/dashboard-resolved-job.png', fullPage: true });
+  await page.locator('#open-resolved-job').click();
+  await page.locator('#job-status').getByText('完了', { exact: true }).waitFor();
+  assert(await page.locator('#resume-job').isDisabled());
+  assert(!await page.locator('#screen').isVisible());
+  if(errors.length)throw new Error(errors.join('\n'));
+  console.log(JSON.stringify({ login: 'ok', overview: 'ok', imported_account: 'live-test-001', resolved_job: 'ok', completed_job_link: 'ok', page_errors: errors }));
+} finally { await browser.close(); }

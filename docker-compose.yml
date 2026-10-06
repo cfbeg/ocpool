@@ -1,0 +1,58 @@
+name: ocpool
+
+services:
+  surfshark-pool:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.surfshark
+    container_name: ocpool-surfshark
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    environment:
+      OCPOOL_VPN_BACKEND: wireguard
+      OCPOOL_WG_POOL_SIZE: ${OCPOOL_WG_POOL_SIZE:-4}
+      OCPOOL_WG_CONFIG_FILE: /run/secrets/wg.conf
+      OCPOOL_WG_CATALOG_FILE: /run/servers.json
+      OCPOOL_VPN_STATE_FILE: /var/lib/ocpool/limits.json
+      OCPOOL_RELAY_LISTEN: 0.0.0.0:18071
+      OCPOOL_RELAY_TOKEN_FILE: /run/secrets/relay-token
+    volumes:
+      - ${SURFSHARK_BASE_CONFIG:-./wg.conf}:/run/secrets/wg.conf:ro
+      - ${SURFSHARK_CATALOG:-./.state/surfshark/servers.json}:/run/servers.json:ro
+      - ${SURFSHARK_TOKEN:-./.state/surfshark/relay-pool-token.txt}:/run/secrets/relay-token:ro
+      - ${SURFSHARK_STATE:-./.state/surfshark/pool-state}:/var/lib/ocpool
+    ports:
+      - "127.0.0.1:18100:18071"
+    healthcheck:
+      test: ["CMD-SHELL", "t=$$(cat /run/secrets/relay-token) && curl -fsS -H X-Relay-Auth:$$t http://127.0.0.1:18071/health | grep -q '\"healthy\":true'"]
+      interval: 15s
+      timeout: 8s
+      start_period: 45s
+      retries: 8
+
+  ocpool:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: ocpool
+    restart: unless-stopped
+    init: true
+    depends_on:
+      surfshark-pool:
+        condition: service_healthy
+    environment:
+      OCPool_ROOT: /app
+      OCPool_LISTEN: 0.0.0.0:10000
+      OCPool_RELAY_URL: http://surfshark-pool:18071
+      OCPool_RELAY_TOKEN_FILE: /app/.state/surfshark/relay-pool-token.txt
+    volumes:
+      - ./.state:/app/.state
+    ports:
+      - "127.0.0.1:10000:10000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:10000/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 6

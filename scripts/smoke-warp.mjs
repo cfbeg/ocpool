@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const token = (await readFile(new URL('../.state/warp/control-token.txt', import.meta.url), 'utf8')).trim();
+const relayURL = process.env.OCPOOL_WARP_RELAY_URL || 'http://127.0.0.1:18071';
+const auth = { 'X-Relay-Auth': token };
+const healthResponse = await fetch(`${relayURL}/health`, { headers: auth });
+assert.equal(healthResponse.status, 200);
+const health = await healthResponse.json();
+assert.equal(health.healthy, true);
+assert.equal(health.connected, true);
+assert.ok(['on', 'plus'].includes(health.warp));
+assert.ok(['opencode.ai', 'cloudflare.com'].includes(health.ip_scope));
+const requestHeaders = { ...auth, 'X-Relay-Target': 'https://opencode.ai', 'X-Relay-Path': '/zen/v1/models' };
+const modelsResponse = await fetch(`${relayURL}/fetch`, { method: 'POST', headers: requestHeaders });
+assert.equal(modelsResponse.status, 200);
+const models = await modelsResponse.json();
+assert.ok(models.data.length > 0);
+const denied = await fetch(`${relayURL}/fetch`, { method: 'POST', headers: { ...requestHeaders, 'X-Relay-Path': '/console/api/user' } });
+assert.equal(denied.status, 400);
+await denied.arrayBuffer();
+const unauthenticated = await fetch(`${relayURL}/health`);
+assert.equal(unauthenticated.status, 401);
+await unauthenticated.arrayBuffer();
+console.log(JSON.stringify({ healthy: health.healthy, public_ip: health.public_ip, ip_scope: health.ip_scope, warp: health.warp, model_count: models.data.length, path_guard: 'passed', authentication: 'passed' }));

@@ -1,0 +1,15 @@
+node_modules/
+.state/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log
+*.tgz
+bin/
+wg.conf
+email-worker/.wrangler/
+email-worker/wrangler.jsonc
+
+AGENTS.md

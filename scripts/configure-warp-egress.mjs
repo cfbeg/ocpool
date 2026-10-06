@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const base = process.env.OCPOOL_URL || 'http://127.0.0.1:10000';
+const token = (await readFile('.state/warp/control-token.txt', 'utf8')).trim();
+const key = (await readFile('.state/server/admin-key.txt', 'utf8')).trim();
+const warpURL = 'http://127.0.0.1:18071';
+const healthResponse = await fetch(warpURL + '/health', { headers: { 'X-Relay-Auth': token }, signal: AbortSignal.timeout(15000) });
+const health = await healthResponse.json();
+assert.equal(healthResponse.status, 200); assert(health.healthy && health.connected, 'dedicated WARP is not ready');
+assert.equal(health.ip_scope, 'opencode.ai', 'target egress IP is unverified');
+const headers = { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+const current = await (await fetch(base + '/api/egress', { headers })).json();
+assert(current.config, 'OCPool egress API is unavailable');
+const config = { ...current.config, mode: 'sticky', allow_direct_fallback: false };
+config.endpoints = config.endpoints.filter(x => x.id !== 'warp-1');
+config.endpoints.unshift({ id: 'warp-1', name: '専用WARP', kind: 'warp', url: warpURL, secret: token, enabled: true, rotate_on_limit: true });
+const saved = await fetch(base + '/api/egress', { method: 'PUT', headers, body: JSON.stringify(config) });
+assert.equal(saved.status, 200, `egress setup failed: ${await saved.text()}`);
+const probe = await fetch(base + '/api/egress/warp-1/probe', { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(20000) });
+assert.equal(probe.status, 200); const status = await probe.json(); assert(status.healthy);
+console.log(JSON.stringify({ mode: config.mode, direct_fallback: false, warp_healthy: status.healthy, public_ip: status.public_ip, ip_scope: status.ip_scope }));

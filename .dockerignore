@@ -1,0 +1,16 @@
+.git
+.state
+.wrangler
+**/.wrangler
+**/.dev.vars
+**/.env
+**/.env.*
+email-worker/wrangler.jsonc
+node_modules
+bin
+*.log
+wg.conf
+Dockerfile*
+docker-compose*.yml
+*.tgz
+ops/warp

@@ -1,0 +1,20 @@
+{
+  "name": "ocpool-onboarding",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test email-worker/test/*.test.mjs",
+    "email:dev": "wrangler dev --config email-worker/wrangler.jsonc",
+    "email:deploy": "wrangler deploy --config email-worker/wrangler.jsonc",
+    "browser:inspect": "node scripts/inspect-console.mjs"
+  },
+  "dependencies": {
+    "cloakbrowser": "0.5.12",
+    "playwright-core": "1.63.0",
+    "postal-mime": "4.0.4"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "wrangler": "4.147.0"
+  }
+}
