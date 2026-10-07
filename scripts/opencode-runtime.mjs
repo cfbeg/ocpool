@@ -18,7 +18,9 @@ export async function prepareProfile(directory) {
     XDG_DATA_HOME: join(root, 'data'), XDG_CONFIG_HOME: join(root, 'config'),
     XDG_CACHE_HOME: join(root, 'cache'), XDG_STATE_HOME: join(root, 'state'),
     TMPDIR: join(root, 'temp'), TMP: join(root, 'temp'), TEMP: join(root, 'temp'),
-    OPENCODE_CONFIG: configPath, OPENCODE_CONFIG_DIR: join(root, 'config'),
+    // Match OpenCode's derived Global.Path.config (XDG_CONFIG_HOME/opencode)
+    // so it does not install a duplicate plugin tree in the parent directory.
+    OPENCODE_CONFIG: configPath, OPENCODE_CONFIG_DIR: join(root, 'config', 'opencode'),
     OPENCODE_TEST_HOME: join(root, 'home'), OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
     OPENCODE_SERVER_PASSWORD: randomBytes(32).toString('hex'), NO_COLOR: '1'
   });

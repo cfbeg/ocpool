@@ -23,6 +23,7 @@ type Message struct {
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	Reasoning        json.RawMessage `json:"reasoning,omitempty"`
 	Name             string          `json:"name,omitempty"`
+	Phase            string          `json:"phase,omitempty"`
 }
 
 func messageText(raw json.RawMessage) (string, error) {
@@ -52,6 +53,8 @@ func promptMessages(messages []Message) (string, string, error) {
 		Content    string     `json:"content"`
 		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 		ToolCallID string     `json:"tool_call_id,omitempty"`
+		Name       string     `json:"name,omitempty"`
+		Phase      string     `json:"phase,omitempty"`
 	}
 	history := []turn{}
 	systems := []string{}
@@ -62,14 +65,17 @@ func promptMessages(messages []Message) (string, string, error) {
 		}
 		switch m.Role {
 		case "system", "developer":
+			if m.Name != "" {
+				t = "Message from " + m.Name + ":\n" + t
+			}
 			systems = append(systems, t)
 		case "user", "assistant":
-			history = append(history, turn{Role: m.Role, Content: t, ToolCalls: m.ToolCalls})
+			history = append(history, turn{Role: m.Role, Content: t, ToolCalls: m.ToolCalls, Name: m.Name, Phase: m.Phase})
 		case "tool":
 			if m.ToolCallID == "" {
 				return "", "", errors.New("tool messages require tool_call_id")
 			}
-			history = append(history, turn{Role: m.Role, Content: t, ToolCallID: m.ToolCallID})
+			history = append(history, turn{Role: m.Role, Content: t, ToolCallID: m.ToolCallID, Name: m.Name})
 		default:
 			return "", "", errors.New("unsupported message role")
 		}
@@ -77,7 +83,7 @@ func promptMessages(messages []Message) (string, string, error) {
 	if len(history) == 0 {
 		return "", "", errors.New("at least one user message is required")
 	}
-	if len(history) == 1 && history[0].Role == "user" {
+	if len(history) == 1 && history[0].Role == "user" && history[0].Name == "" && history[0].Phase == "" {
 		return history[0].Content, strings.Join(systems, "\n\n"), nil
 	}
 	raw, _ := json.Marshal(history)
@@ -166,7 +172,7 @@ func (a *App) generate(ctx context.Context, model string, messages []Message, ac
 	}
 	system = "This is an API conversation. Answer in the response text, following the client's instructions. Do not use OpenCode's built-in filesystem, shell, task or network tools. A request to print or output text means to write that text in your answer. Use the client tools in the ocpool MCP namespace when client tools are provided.\n\n" + system
 	queueCtx, cancelQueue := context.WithTimeout(ctx, time.Duration(a.store.Settings().QueueSeconds)*time.Second)
-	r, err := a.pool.acquire(queueCtx, model, account, ctx)
+	r, err := a.pool.acquireWithAffinity(queueCtx, model, account, opts.CacheAffinity, ctx)
 	cancelQueue()
 	if err != nil {
 		return out, err
@@ -709,8 +715,13 @@ func inferenceStreamError(err error) map[string]any {
 
 func (a *App) chat(w http.ResponseWriter, r *http.Request) {
 	var req chatRequest
-	if err := readJSON(w, r, &req); err != nil {
-		problem(w, 400, err.Error())
+	envelope, err := readCompatJSON(w, r, &req)
+	if err != nil {
+		compatDecodeProblem(w, err)
+		return
+	}
+	r, accepted := envelope.adapt(w, r, false)
+	if !accepted {
 		return
 	}
 	toolPlan, toolError := parseTools(req.Tools, req.ToolChoice, req.ParallelToolCalls)
@@ -769,6 +780,7 @@ func (a *App) chat(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, err.Error())
 		return
 	}
+	opts.CacheAffinity = cacheAffinity(r.Context(), req.Model, req.PromptCacheKey)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(a.store.Settings().RequestSeconds)*time.Second)
 	defer cancel()
 	id := newID("chatcmpl")

@@ -19,6 +19,7 @@ type GenerationOptions struct {
 	Reasoning       *ReasoningOptions  `json:"reasoning,omitempty"`
 	Tools           *toolPlan          `json:"-"`
 	ReasoningDelta  func(string) error `json:"-"`
+	CacheAffinity   string             `json:"-"`
 }
 
 func (o GenerationOptions) validate() error {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +13,12 @@ type ReasoningOptions struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-// Advisory client metadata has no equivalent in an isolated OpenCode runtime.
+// The request envelope retains these values until the request ends. The
+// selected adapter classifies them before any runtime or stream is started.
 type ClientHints struct {
 	Include              []string          `json:"include"`
 	Metadata             map[string]string `json:"metadata"`
+	ClientMetadata       json.RawMessage   `json:"client_metadata"`
 	User                 string            `json:"user"`
 	SafetyIdentifier     string            `json:"safety_identifier"`
 	PromptCacheKey       string            `json:"prompt_cache_key"`
@@ -54,8 +57,12 @@ var functionName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 func parseTools(raw, choice json.RawMessage, parallel *bool) (*toolPlan, error) {
 	var definitions []toolDefinition
-	if len(raw) > 0 && json.Unmarshal(raw, &definitions) != nil {
-		return nil, errors.New("tools must be an array")
+	if len(raw) > 0 {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if decoder.Decode(&definitions) != nil {
+			return nil, errors.New("tools must be an array")
+		}
 	}
 	plan := &toolPlan{choice: "auto", parallel: parallel == nil || *parallel}
 	seen := map[string]bool{}

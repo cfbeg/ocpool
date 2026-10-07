@@ -63,6 +63,18 @@ Composeの`ocpool`には、少なくとも次をホストディレクトリへ�
 
 ## 更新・停止
 
+ソースを更新してOCPoolだけを再ビルドする場合:
+
+```powershell
+git pull --ff-only
+docker compose up -d --build --no-deps ocpool
+docker compose logs --tail=50 ocpool
+```
+
+`.state` は既存のバインドマウントを継続します。OCPoolの再作成は処理中の要求を切断するため、実行中の生成・登録ジョブが終わってから更新してください。設定ディレクトリの二重生成を防ぐ修正もソースに含まれており、移行バックアップに添付された `code.patch` の適用は不要です。既にそのパッチを適用済みでpullが止まる場合は、先に `git diff` でローカル変更を確認してください。
+
+互換APIの項目別処理と、更新後に返る `422 unsupported_parameter` の説明は[リクエスト変換](request-adapter.md)を参照してください。
+
 ```powershell
 docker compose up -d --build
 docker compose stop

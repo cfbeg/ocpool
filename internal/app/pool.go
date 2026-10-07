@@ -229,6 +229,10 @@ func (p *Pool) snapshots() []map[string]any {
 	return out
 }
 func (p *Pool) acquire(ctx context.Context, model, pinned string, requestContexts ...context.Context) (*Runtime, error) {
+	return p.acquireWithAffinity(ctx, model, pinned, "", requestContexts...)
+}
+
+func (p *Pool) acquireWithAffinity(ctx context.Context, model, pinned, affinity string, requestContexts ...context.Context) (*Runtime, error) {
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -240,6 +244,13 @@ func (p *Pool) acquire(ctx context.Context, model, pinned string, requestContext
 		}
 		if len(candidates) == 0 {
 			return nil, errors.New("このモデルを利用できるアカウントがありません。状態・クールダウンを確認してください")
+		}
+		if pinned == "" && affinity != "" {
+			// Rendezvous hashing keeps an eligible account stable across process
+			// restarts and least-recently-used changes without an unbounded cache.
+			// Busy accounts wait within the normal queue budget. Unavailable or
+			// cooling accounts are already excluded by Candidates.
+			candidates = []Account{affinityAccount(candidates, affinity)}
 		}
 		p.mu.Lock()
 		if p.closing {
@@ -524,7 +535,11 @@ func profileEnvironment(root, password string) ([]string, error) {
 			env = append(env, v)
 		}
 	}
-	for k, v := range map[string]string{"XDG_DATA_HOME": "data", "XDG_CONFIG_HOME": "config", "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "TEMP": "temp", "TMP": "temp", "TMPDIR": "temp", "OPENCODE_TEST_HOME": "home", "OPENCODE_CONFIG_DIR": "config"} {
+	// OpenCode derives Global.Path.config as XDG_CONFIG_HOME/opencode. Keep
+	// OPENCODE_CONFIG_DIR on that same directory so ConfigPaths deduplicates it;
+	// pointing it at the parent config directory makes OpenCode install a second
+	// copy of @opencode-ai/plugin for every account profile.
+	for k, v := range map[string]string{"XDG_DATA_HOME": "data", "XDG_CONFIG_HOME": "config", "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "TEMP": "temp", "TMP": "temp", "TMPDIR": "temp", "OPENCODE_TEST_HOME": "home", "OPENCODE_CONFIG_DIR": filepath.Join("config", "opencode")} {
 		env = append(env, k+"="+filepath.Join(root, v))
 	}
 	env = append(env, "OPENCODE_CONFIG="+cfg, "OPENCODE_DISABLE_PROJECT_CONFIG=true", "OPENCODE_SERVER_PASSWORD="+password, "NO_COLOR=1")

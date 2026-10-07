@@ -73,13 +73,15 @@ Responsesの保存期限は30分です。会話の継続は同じアカウント
 
 `temperature`、`top_p`、`max_tokens` / `max_completion_tokens`、Responsesの `max_output_tokens` は、セッションごとの設定ファイルとOpenCodeの `chat.params` フックを通して適用します。トークン上限はモデル上限までに制限します。Chatの `stop` はチャンク境界をまたいでも除去し、`n` は1〜8件を順番に生成します。
 
-Piの `reasoning`、Chatの `reasoning_effort` を受け付け、OpenCodeのモデルカタログに該当するvariantがあれば、そのプロバイダー固有の推論設定を使います。`big-pickle` など推論強度のvariantがないモデルはモデル既定動作になります。推論本文とトークン使用量はSSEにも返します。`include`、キャッシュキー・保持期間、service tierなどのクライアント付帯情報は受け付けますが、上流でのキャッシュ期間・サービス階層・暗号化推論データの取得は指定しません。
+Piの `reasoning`、Chatの `reasoning_effort` を受け付け、OpenCodeのモデルカタログに該当するvariantがあれば、そのプロバイダー固有の推論設定を使います。`big-pickle` など推論強度のvariantがないモデルはモデル既定動作になります。このモデル依存の変換はレスポンスの `X-OCPool-Adapter` ヘッダーに明示します。推論本文とトークン使用量はSSEにも返します。
+
+互換APIは受信JSONをリクエスト中のメモリに保持し、項目ごとの変換・ローカル保持・未対応を判定します。`client_metadata` は上流へ送らず保持し、`prompt_cache_key` はAPIキー・モデルごとのアカウント固定に使います。Responsesの `metadata` は応答と、`store:true` の場合は保存済みレスポンスに含めます。未対応の意味を持つ指定や未知のフィールドは、生成・SSE開始前に `422 unsupported_parameter` で一覧を返します。たとえば非空の `include`（暗号化推論を含む）、`text.verbosity`、JSON Schema出力、キャッシュ保持期間、優先service tierは現在未対応です。これらを自動付加するクライアントは送信設定の変更が必要です。[対応表と変換診断](docs/request-adapter.md)を参照してください。
 
 function toolsのJSON Schemaは、要求ごとのローカルMCPからOpenCodeへ渡します。OpenCode側では `ocpool_` の名前空間が付き、クライアントへ返す際に元のツール名へ戻します。実際のツール実行はPiなどのクライアント側です。OpenCodeの権限要求でネイティブ実行を止め、モデルが生成したcall IDと引数をそのまま返します。要求終了時にMCPを切断し、次の要求へツール定義を持ち越しません。
 
 上流のツール選択はOpenCode標準のautoです。`StructuredOutput` は使いません。`tool_choice:required` / 名前指定は公開する定義と指示で制約し、返された呼び出しを検証します。モデルが従わない場合はエラーを返すため、上流での強制選択と同等ではありません。`parallel_tool_calls:false` は1件に制約し、返された件数を検証します。テキストは生成中に配信し、ツール呼び出しはネイティブのターンが完了してから返します。独自文法のcustom tools、画像・音声は未対応です。
 
-会話の履歴はロール・tool call IDを含むJSON形式でOpenCodeへ渡すため、他社APIとトークン消費・応答の完全一致は保証しません。Responsesの過去のreasoning項目は受け付けますが、プロバイダー固有の暗号化推論データの再利用は行いません。OpenCode内蔵のファイル操作・シェル等で権限確認が発生した場合は拒否し、クライアントへエラーを返します。
+会話の履歴はロール・tool call ID・名前・assistantのphaseを含むJSON形式でOpenCodeへ渡すため、他社APIとトークン消費・応答の完全一致は保証しません。Responsesの過去のreasoning項目のsummary/contentはリクエスト中にローカル保持し、非空の `encrypted_content` は未対応として422を返します。OpenCode内蔵ツールの実行は拒否し、クライアント用ツールへ最大2回まで再誘導します。回復できなければエラーを返します。
 
 ## 数百アカウントの扱い
 
@@ -156,13 +158,13 @@ node scripts/smoke-surfshark.mjs
 
 `smoke-server.mjs` は実際にモデルを呼び出します。`smoke-web-creator.mjs` は実アカウントを1件登録します。後者は通常のユニットテストには含めません。
 
-`smoke-pi.mjs` はインストール済みPiの送信・解析実装を使い、両APIで推論・ツール呼び出し・結果の再送を検証します。必要なら `OCPOOL_PI_AI_DIR` でPi AIの `dist` ディレクトリを指定できます。
+`smoke-pi.mjs` はインストール済みPiの送信・解析実装を使い、両APIで推論・ツール呼び出し・結果の再送を検証します。必要なら `OCPOOL_PI_AI_DIR` でPi AIの `dist` ディレクトリを指定できます。Piが未対応の `include` やキャッシュ保持期間などを送る場合は422で停止します。スクリプト側で自動削除は行いません。
 
 `--coding-tools` はOpenCode内蔵ツールと同じ `read` / `bash` を宣言し、指定した `read` をクライアントへ返すことと `parallel_tool_calls:false` を検証します。`--auto-tools` はPi標準の自動選択を検証します。どちらもツール結果にはfixtureを返し、実ファイルやシェルを操作しません。
 
 実際のWARP制限が記録されているときは `node scripts/smoke-egress-rate-limit.mjs` で、WARPのみの設定で429を速やかに返すことを確認できます。制限を発生させるための連続生成は行いません。
 
-この環境ではCコンパイラーがないため、`go test -race` は実行できていません。並列処理の通常テストと `go vet` は実行済みです。
+Windowsホストでは通常のGoテストと `go vet` を実行し、LinuxのDockerビルドステージでは `go test -race ./...` も実行済みです。リクエスト変換の検証では模擬OpenCodeサーバーを使い、実アカウントへの生成要求は行いません。
 
 詳細: [設計](PLAN.md)、[登録・OAuth](docs/onboarding.md)、[管理サーバーの検証](docs/server-verification.md)。
 

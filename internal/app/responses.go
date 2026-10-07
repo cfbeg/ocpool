@@ -45,6 +45,7 @@ func responseMessages(raw json.RawMessage, instructions string) ([]Message, erro
 		Name      string          `json:"name"`
 		Arguments string          `json:"arguments"`
 		Output    json.RawMessage `json:"output"`
+		Phase     string          `json:"phase"`
 	}
 	if json.Unmarshal(raw, &list) != nil {
 		return nil, errors.New("input must be text or a list of text messages")
@@ -73,14 +74,19 @@ func responseMessages(raw json.RawMessage, instructions string) ([]Message, erro
 		if item.Type != "" && item.Type != "message" {
 			return nil, errors.New("only message input is supported")
 		}
-		out = append(out, Message{Role: item.Role, Content: item.Content})
+		out = append(out, Message{Role: item.Role, Content: item.Content, Phase: item.Phase})
 	}
 	return out, nil
 }
 func (a *App) responses(w http.ResponseWriter, r *http.Request) {
 	var req responseRequest
-	if e := readJSON(w, r, &req); e != nil {
-		problem(w, 400, e.Error())
+	envelope, err := readCompatJSON(w, r, &req)
+	if err != nil {
+		compatDecodeProblem(w, err)
+		return
+	}
+	r, accepted := envelope.adapt(w, r, true)
+	if !accepted {
 		return
 	}
 	plan, e := parseTools(req.Tools, req.ToolChoice, req.ParallelToolCalls)
@@ -126,6 +132,7 @@ func (a *App) responses(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "model must use provider/model")
 		return
 	}
+	opts.CacheAffinity = cacheAffinity(r.Context(), req.Model, req.PromptCacheKey)
 	id := newID("resp")
 	created := time.Now().Unix()
 	store := req.Store == nil || *req.Store
@@ -167,6 +174,9 @@ func (a *App) responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := map[string]any{"id": id, "object": "response", "created_at": created, "status": "completed", "model": req.Model, "output": output, "output_text": result.Text, "previous_response_id": req.Previous, "usage": map[string]any{"input_tokens": result.InputTokens, "output_tokens": result.OutputTokens, "total_tokens": result.InputTokens + result.OutputTokens, "input_tokens_details": map[string]int{"cached_tokens": result.CacheReadTokens, "cache_write_tokens": result.CacheWriteTokens}, "output_tokens_details": map[string]int{"reasoning_tokens": result.ReasoningTokens}}}
+	if req.Metadata != nil {
+		body["metadata"] = req.Metadata
+	}
 	if result.FinishReason == "length" {
 		body["status"] = "incomplete"
 		body["incomplete_details"] = map[string]string{"reason": "max_output_tokens"}

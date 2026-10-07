@@ -27,6 +27,29 @@ func TestPiResponsesEnvelopeAndHistory(t *testing.T) {
 	}
 }
 
+func TestEnvelopeDecodesCodexExtensionsBeforeCapabilityValidation(t *testing.T) {
+	raw := `{"model":"opencode/big-pickle","input":"hello","client_metadata":{"x-codex-installation-id":"test"},"include":["reasoning.encrypted_content"],"text":{"verbosity":"high"},"access_programs":[],"future_field":{"kept_by_client":true}}`
+	var req responseRequest
+	if _, e := readCompatJSON(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/responses", strings.NewReader(raw)), &req); e != nil {
+		t.Fatal(e)
+	}
+	if string(req.ClientMetadata) != `{"x-codex-installation-id":"test"}` {
+		t.Fatalf("client metadata was not accepted: %s", req.ClientMetadata)
+	}
+	if req.Model != "opencode/big-pickle" || string(req.Input) != `"hello"` {
+		t.Fatalf("typed request fields were not decoded: %+v", req)
+	}
+}
+
+func TestManagementJSONRemainsStrict(t *testing.T) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if e := readJSON(httptest.NewRecorder(), httptest.NewRequest("POST", "/admin", strings.NewReader(`{"name":"x","future_field":true}`)), &req); e == nil {
+		t.Fatal("strict management decoder accepted an unknown field")
+	}
+}
+
 func TestToolChoiceAndCapturedCalls(t *testing.T) {
 	raw := json.RawMessage(`[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{}}}]`)
 	parallel := false
